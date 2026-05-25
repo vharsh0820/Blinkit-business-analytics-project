@@ -1,0 +1,231 @@
+-- =====================================================
+-- BLINKIT BUSINESS ANALYTICS SQL ANALYSIS
+-- Project: End-to-End Business Analyst + Data Analytics Project
+-- Tools: PostgreSQL (pgAdmin)
+-- Author: Harsh Vardhan
+-- =====================================================
+
+
+-- =====================================================
+-- 1. CUSTOMER SEGMENTATION ANALYSIS
+-- =====================================================
+
+SELECT
+    CASE
+        WHEN recency_days <= 30
+             AND total_orders >= 10
+             AND total_spend >= 10000
+        THEN 'Champion'
+
+        WHEN recency_days <= 60
+             AND total_orders >= 5
+        THEN 'Loyal'
+
+        WHEN recency_days <= 90
+             AND total_orders >= 2
+        THEN 'Potential Loyal'
+
+        ELSE 'At Risk'
+    END AS customer_segment,
+
+    COUNT(customer_id) AS customer_count,
+
+    ROUND(
+        COUNT(customer_id) * 100.0 /
+        SUM(COUNT(customer_id)) OVER(),
+        1
+    ) AS customer_percentage
+
+FROM customer_order_summary
+GROUP BY customer_segment
+ORDER BY customer_count DESC;
+
+
+-- =====================================================
+-- 2. CUSTOMER SEGMENT VIEW CREATION
+-- =====================================================
+
+CREATE OR REPLACE VIEW customer_segments AS
+SELECT
+    customer_id,
+    total_orders,
+    total_spend,
+    avg_order_value,
+    recency_days,
+
+    CASE
+        WHEN recency_days <= 30
+             AND total_orders >= 10
+             AND total_spend >= 10000
+        THEN 'Champion'
+
+        WHEN recency_days <= 60
+             AND total_orders >= 5
+        THEN 'Loyal'
+
+        WHEN recency_days <= 90
+             AND total_orders >= 2
+        THEN 'Potential Loyal'
+
+        ELSE 'At Risk'
+    END AS customer_segment
+
+FROM customer_order_summary;
+
+
+-- =====================================================
+-- 3. CUSTOMER LIFETIME VALUE (CLV) ANALYSIS
+-- =====================================================
+
+SELECT
+    customer_segment,
+    COUNT(customer_id) AS customer_count,
+    ROUND(AVG(total_spend), 2) AS avg_clv,
+    ROUND(SUM(total_spend), 2) AS total_clv
+FROM customer_segments
+GROUP BY customer_segment
+ORDER BY total_clv DESC;
+
+
+-- =====================================================
+-- 4. DELIVERY PERFORMANCE ANALYSIS
+-- =====================================================
+
+SELECT
+    COUNT(order_id) AS total_deliveries,
+
+    SUM(
+        CASE
+            WHEN delivery_status = 'On Time' THEN 1
+            ELSE 0
+        END
+    ) AS on_time_deliveries,
+
+    SUM(
+        CASE
+            WHEN delivery_status IN ('Slightly Delayed', 'Significantly Delayed')
+            THEN 1
+            ELSE 0
+        END
+    ) AS delayed_deliveries,
+
+    ROUND(
+        SUM(CASE WHEN delivery_status = 'On Time' THEN 1 ELSE 0 END) * 100.0
+        / COUNT(order_id),
+        1
+    ) AS on_time_percentage,
+
+    ROUND(
+        SUM(
+            CASE
+                WHEN delivery_status IN ('Slightly Delayed', 'Significantly Delayed')
+                THEN 1
+                ELSE 0
+            END
+        ) * 100.0 / COUNT(order_id),
+        1
+    ) AS delayed_percentage,
+
+    ROUND(AVG(delivery_time_minutes)::numeric, 1) AS avg_delivery_time
+
+FROM delivery_performance;
+
+
+-- =====================================================
+-- 5. CUSTOMER FEEDBACK VS DELIVERY PERFORMANCE
+-- =====================================================
+
+SELECT
+    d.delivery_status,
+    COUNT(f.order_id) AS total_feedbacks,
+    ROUND(AVG(f.rating)::numeric, 2) AS avg_rating
+
+FROM delivery_performance d
+JOIN customer_feedback f
+    ON d.order_id = f.order_id
+
+GROUP BY d.delivery_status
+ORDER BY avg_rating DESC;
+
+
+-- =====================================================
+-- 6. CHURN ANALYSIS VS DELIVERY EXPERIENCE
+-- =====================================================
+
+SELECT
+    CASE
+        WHEN c.recency_days > 90 THEN 'Churned'
+        ELSE 'Active'
+    END AS customer_status,
+
+    d.delivery_status,
+
+    COUNT(DISTINCT c.customer_id) AS customer_count,
+
+    ROUND(
+        COUNT(DISTINCT c.customer_id) * 100.0 /
+        SUM(COUNT(DISTINCT c.customer_id)) OVER (
+            PARTITION BY
+            CASE
+                WHEN c.recency_days > 90 THEN 'Churned'
+                ELSE 'Active'
+            END
+        ),
+        1
+    ) AS percentage_within_status
+
+FROM customer_order_summary c
+JOIN orders o
+    ON c.customer_id = o.customer_id
+JOIN delivery_performance d
+    ON o.order_id = d.order_id
+
+GROUP BY customer_status, d.delivery_status
+ORDER BY customer_status, percentage_within_status DESC;
+
+
+-- =====================================================
+-- 7. PRODUCT CATEGORY REVENUE ANALYSIS
+-- =====================================================
+
+SELECT
+    p.category,
+    ROUND(SUM(oi.total_price)::numeric, 2) AS total_revenue,
+    COUNT(DISTINCT oi.order_id) AS total_orders
+
+FROM order_items oi
+JOIN products p
+    ON oi.product_id = p.product_id
+
+GROUP BY p.category
+ORDER BY total_revenue DESC;
+
+
+-- =====================================================
+-- 8. MARKETING CHANNEL PERFORMANCE ANALYSIS
+-- =====================================================
+
+SELECT
+    channel,
+    ROUND(SUM(spend)::numeric, 2) AS total_spend,
+    ROUND(SUM(revenue_generated)::numeric, 2) AS total_revenue,
+    ROUND(AVG(roas)::numeric, 2) AS avg_roas
+
+FROM marketing_performance
+GROUP BY channel
+ORDER BY avg_roas DESC;
+
+
+-- =====================================================
+-- 9. CUSTOMER REVENUE CONTRIBUTION ANALYSIS
+-- =====================================================
+
+SELECT
+    customer_segment,
+    COUNT(customer_id) AS customer_count,
+    ROUND(SUM(total_orders * avg_order_value)::numeric, 2) AS total_revenue,
+    ROUND(AVG(avg_order_value)::numeric, 2) AS avg_order_value
+
+FROM customers
+GROUP BY customer_segment
+ORDER BY total_revenue DESC;
